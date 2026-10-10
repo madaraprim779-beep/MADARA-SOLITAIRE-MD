@@ -1,72 +1,42 @@
 
-require("dotenv").config();
+const { menuCommand } = require("./menu");
+const { pingCommand } = require("./ping");
+const { aliveCommand } = require("./alive");
+const { ownerCommand } = require("./owner");
+const { botinfoCommand } = require("./botinfo");
+const { runtimeCommand } = require("./runtime");
+const { pairCommand } = require("./pair");
 
-const pino = require("pino");
-const {
-  default: makeWASocket,
-  useMultiFileAuthState,
-  DisconnectReason,
-  Browsers
-} = require("@whiskeysockets/baileys");
+async function handleCommand(sock, jid, text) {
+  const parts = text.trim().split(/\s+/);
+  const command = (parts[0] || "").toLowerCase();
 
-const { handleCommand } = require("./commands");
+  switch (command) {
+    case ".menu":
+    case ".help":
+      return menuCommand(sock, jid);
 
-async function startBot() {
-  const { state, saveCreds } =
-    await useMultiFileAuthState("session");
+    case ".ping":
+      return pingCommand(sock, jid);
 
-  const sock = makeWASocket({
-    auth: state,
-    logger: pino({ level: "silent" }),
-    browser: Browsers.ubuntu("Chrome")
-  });
+    case ".alive":
+      return aliveCommand(sock, jid);
 
-  sock.ev.on("creds.update", saveCreds);
+    case ".owner":
+      return ownerCommand(sock, jid);
 
-  sock.ev.on("connection.update", ({ connection, lastDisconnect }) => {
-    if (connection === "open") {
-      console.log("MADARA SOLITAIRE MD est connecté !");
-    }
+    case ".botinfo":
+      return botinfoCommand(sock, jid);
 
-    if (connection === "close") {
-      const code = lastDisconnect?.error?.output?.statusCode;
+    case ".runtime":
+      return runtimeCommand(sock, jid);
 
-      if (code !== DisconnectReason.loggedOut) {
-        setTimeout(() => startBot(), 3000);
-      } else {
-        console.log("Session déconnectée. Relie ton compte à nouveau.");
-      }
-    }
-  });
+    case ".pair":
+      return pairCommand(sock, jid);
 
-  sock.ev.on("messages.upsert", async ({ messages, type }) => {
-    if (type !== "notify") return;
-
-    for (const msg of messages) {
-      if (!msg.message || msg.key.fromMe) continue;
-
-      const jid = msg.key.remoteJid;
-      if (!jid || jid === "status@broadcast") continue;
-
-      const text =
-        msg.message.conversation ||
-        msg.message.extendedTextMessage?.text ||
-        msg.message.imageMessage?.caption ||
-        msg.message.videoMessage?.caption ||
-        "";
-
-      if (!text.trim().startsWith(".")) continue;
-
-      try {
-        await handleCommand(sock, jid, text);
-      } catch (error) {
-        console.error("Erreur de commande :", error);
-        await sock.sendMessage(jid, {
-          text: "❌ Une erreur est survenue. Réessaie plus tard."
-        });
-      }
-    }
-  });
+    default:
+      return;
+  }
 }
 
-startBot().catch(console.error);
+module.exports = { handleCommand };
