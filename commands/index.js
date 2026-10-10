@@ -1,14 +1,20 @@
 
+
 const { menuCommand } = require("./menu");
 const { pingCommand } = require("./ping");
 const { aliveCommand } = require("./alive");
 const { ownerCommand } = require("./owner");
 const { botinfoCommand } = require("./botinfo");
 const { runtimeCommand } = require("./runtime");
+const { pairCommand } = require("./pair");
 
 async function handleCommand(sock, jid, text) {
+  if (typeof text !== "string") return;
+
   const parts = text.trim().split(/\s+/);
   const command = (parts[0] || "").toLowerCase();
+
+  if (!command.startsWith(".")) return;
 
   switch (command) {
     case ".menu":
@@ -29,6 +35,9 @@ async function handleCommand(sock, jid, text) {
 
     case ".runtime":
       return runtimeCommand(sock, jid);
+
+    case ".pair":
+      return pairCommand(sock, jid, parts.slice(1));
 
     default:
       return;
