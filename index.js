@@ -18,16 +18,17 @@ const rl = readline.createInterface({
 
 function askPhone() {
   return new Promise((resolve) => {
-    rl.question("Numéro WhatsApp avec indicatif, sans + ni espaces : ", (answer) => {
-      resolve(answer.replace(/\D/g, ""));
-    });
+    rl.question(
+      "Numéro WhatsApp international (sans + ni espaces) : ",
+      (answer) => resolve(answer.replace(/\D/g, ""))
+    );
   });
 }
 
-let restarting = false;
-
 async function startBot() {
-  const { state, saveCreds } = await useMultiFileAuthState("./session");
+  const { state, saveCreds } =
+    await useMultiFileAuthState("./session");
+
   let phone = "";
 
   if (!state.creds.registered) {
@@ -40,7 +41,15 @@ async function startBot() {
     }
   }
 
-  const { version } = await fetchLatestBaileysVersion();
+  let version;
+
+  try {
+    ({ version } = await fetchLatestBaileysVersion());
+  } catch (error) {
+    console.error("Impossible de récupérer la version WhatsApp :", error.message);
+    rl.close();
+    return;
+  }
 
   const sock = makeWASocket({
     version,
@@ -54,35 +63,40 @@ async function startBot() {
 
   sock.ev.on("connection.update", ({ connection, lastDisconnect }) => {
     if (connection === "open") {
-      console.log("✅ MADARA SOLITAIRE MD est connecté à WhatsApp !");
+      console.log("✅ MADARA SOLITAIRE MD est connecté !");
       if (!rl.closed) rl.close();
     }
 
-    if (connection === "close" && !restarting) {
-      const code = lastDisconnect?.error?.output?.statusCode;
+    if (connection === "close") {
+      const status = lastDisconnect?.error?.output?.statusCode;
+      console.log("Connexion fermée. Code de statut :", status ?? "inconnu");
 
-      if (code !== DisconnectReason.loggedOut) {
-        restarting = true;
-        setTimeout(() => {
-          restarting = false;
-          startBot().catch(console.error);
-        }, 3000);
+      if (status === DisconnectReason.loggedOut) {
+        console.log("La session est déconnectée. Une nouvelle liaison sera nécessaire.");
       } else {
-        console.log("Session déconnectée. Une nouvelle liaison sera nécessaire.");
-        if (!rl.closed) rl.close();
+        console.log("Vérifie Internet, puis relance npm start.");
       }
+
+      if (!rl.closed) rl.close();
     }
   });
 
   if (!state.creds.registered) {
     try {
+      await new Promise(resolve => setTimeout(resolve, 3000));
       const code = await sock.requestPairingCode(phone);
-      console.log("\n===== MADARA SOLITAIRE MD =====");
-      console.log("CODE DE LIAISON : " + code);
-      console.log("===============================\n");
-      console.log("WhatsApp > Appareils connectés > Connecter un appareil > Connexion avec numéro.");
+
+      console.log("\n================================");
+      console.log(" MADARA SOLITAIRE MD");
+      console.log(" CODE DE LIAISON : " + code);
+      console.log("================================\n");
+      console.log("WhatsApp > Appareils connectés");
+      console.log("> Connecter un appareil");
+      console.log("> Connexion avec numéro de téléphone");
     } catch (error) {
-      console.error("Erreur de liaison :", error.message);
+      console.error("❌ Erreur de liaison :", error.message);
+      sock.end(error);
+      if (!rl.closed) rl.close();
     }
   }
 
@@ -106,10 +120,13 @@ async function startBot() {
       try {
         await handleCommand(sock, jid, content);
       } catch (error) {
-        console.error("Erreur commande :", error.message);
+        console.error("Erreur de commande :", error.message);
       }
     }
   });
 }
 
-startBot().catch(console.error);
+startBot().catch(error => {
+  console.error("Erreur de démarrage :", error.message);
+  if (!rl.closed) rl.close();
+});
