@@ -1,4 +1,5 @@
 
+cat > index.js <<'EOF'
 const readline = require("readline");
 const pino = require("pino");
 
@@ -16,26 +17,28 @@ const rl = readline.createInterface({
   output: process.stdout
 });
 
-function demanderNumero() {
+function askPhone() {
   return new Promise((resolve) => {
     rl.question(
-      "Entre ton numéro WhatsApp avec indicatif, sans + ni espaces (exemple : 225XXXXXXXXXX) : ",
-      (numero) => resolve(numero.replace(/\D/g, ""))
+      "Numéro WhatsApp avec indicatif, sans + ni espaces : ",
+      (answer) => resolve(answer.replace(/\D/g, ""))
     );
   });
 }
+
+let restarting = false;
 
 async function startBot() {
   const { state, saveCreds } =
     await useMultiFileAuthState("./session");
 
-  let numero = "";
+  let phone = "";
 
   if (!state.creds.registered) {
-    numero = await demanderNumero();
+    phone = await askPhone();
 
-    if (numero.length < 8 || numero.length > 15) {
-      console.log("❌ Numéro invalide. Relance le bot et réessaie.");
+    if (phone.length < 8 || phone.length > 15) {
+      console.log("Numéro invalide. Relance npm start.");
       rl.close();
       return;
     }
@@ -53,41 +56,45 @@ async function startBot() {
 
   sock.ev.on("creds.update", saveCreds);
 
-  if (!state.creds.registered && numero) {
-    try {
-      const code = await sock.requestPairingCode(numero);
-      console.log("\n╔════════════════════════════╗");
-      console.log("   MADARA SOLITAIRE MD");
-      console.log("   CODE DE LIAISON WHATSAPP");
-      console.log("   " + code);
-      console.log("╚════════════════════════════╝\n");
-      console.log("Sur WhatsApp : Appareils connectés");
-      console.log("Puis Connecter un appareil → Connecter avec un numéro.");
-      console.log("Saisis le code affiché ci-dessus dans WhatsApp.");
-    } catch (error) {
-      console.error("❌ Erreur de liaison :", error.message);
-      rl.close();
-      return;
-    }
-  }
+  sock.ev.on("connection.update", async (update) => {
+    const { connection, lastDisconnect } = update;
 
-  sock.ev.on("connection.update", ({ connection, lastDisconnect }) => {
     if (connection === "open") {
-      console.log("✅ MADARA SOLITAIRE MD est connecté !");
+      console.log("MADARA SOLITAIRE MD est connecté à WhatsApp !");
       if (!rl.closed) rl.close();
     }
 
-    if (connection === "close") {
-      const statusCode = lastDisconnect?.error?.output?.statusCode;
+    if (connection === "close" && !restarting) {
+      const code = lastDisconnect?.error?.output?.statusCode;
 
-      if (statusCode !== DisconnectReason.loggedOut) {
-        console.log("🔄 Connexion interrompue. Nouvelle tentative...");
-        setTimeout(() => startBot().catch(console.error), 3000);
+      if (code !== DisconnectReason.loggedOut) {
+        restarting = true;
+        console.log("Connexion interrompue. Nouvelle tentative...");
+        setTimeout(() => {
+          restarting = false;
+          startBot().catch(console.error);
+        }, 3000);
       } else {
-        console.log("❌ Session déconnectée. Supprime la session uniquement si tu veux relier le compte.");
+        console.log("Session déconnectée. Relance la liaison WhatsApp.");
+        if (!rl.closed) rl.close();
       }
     }
   });
+
+  if (!state.creds.registered) {
+    try {
+      const code = await sock.requestPairingCode(phone);
+      console.log("\n================================");
+      console.log(" MADARA SOLITAIRE MD");
+      console.log(" CODE DE LIAISON : " + code);
+      console.log("================================\n");
+      console.log("WhatsApp > Appareils connectés");
+      console.log("> Connecter un appareil");
+      console.log("> Connexion avec numéro de téléphone");
+    } catch (error) {
+      console.error("Erreur de liaison :", error.message);
+    }
+  }
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     if (type !== "notify") return;
@@ -109,9 +116,9 @@ async function startBot() {
       try {
         await handleCommand(sock, jid, content);
       } catch (error) {
-        console.error("Erreur de commande :", error.message);
+        console.error("Erreur commande :", error.message);
         await sock.sendMessage(jid, {
-          text: "❌ Une erreur est survenue pendant cette commande."
+          text: "Une erreur est survenue. Réessaie."
         });
       }
     }
@@ -122,3 +129,4 @@ startBot().catch((error) => {
   console.error("Erreur de démarrage :", error);
   if (!rl.closed) rl.close();
 });
+EOF
