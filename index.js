@@ -1,3 +1,7 @@
+
+const readline = require("readline");
+const pino = require("pino");
+
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -5,11 +9,38 @@ const {
   fetchLatestBaileysVersion
 } = require("@whiskeysockets/baileys");
 
-const pino = require("pino");
 const { handleCommand } = require("./commands");
 
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout
+});
+
+function demanderNumero() {
+  return new Promise((resolve) => {
+    rl.question(
+      "Entre ton numéro WhatsApp avec indicatif, sans + ni espaces (exemple : 225XXXXXXXXXX) : ",
+      (numero) => resolve(numero.replace(/\D/g, ""))
+    );
+  });
+}
+
 async function startBot() {
-  const { state, saveCreds } = await useMultiFileAuthState("./session");
+  const { state, saveCreds } =
+    await useMultiFileAuthState("./session");
+
+  let numero = "";
+
+  if (!state.creds.registered) {
+    numero = await demanderNumero();
+
+    if (numero.length < 8 || numero.length > 15) {
+      console.log("❌ Numéro invalide. Relance le bot et réessaie.");
+      rl.close();
+      return;
+    }
+  }
+
   const { version } = await fetchLatestBaileysVersion();
 
   const sock = makeWASocket({
@@ -22,11 +53,28 @@ async function startBot() {
 
   sock.ev.on("creds.update", saveCreds);
 
-  sock.ev.on("connection.update", async (update) => {
-    const { connection, lastDisconnect } = update;
+  if (!state.creds.registered && numero) {
+    try {
+      const code = await sock.requestPairingCode(numero);
+      console.log("\n╔════════════════════════════╗");
+      console.log("   MADARA SOLITAIRE MD");
+      console.log("   CODE DE LIAISON WHATSAPP");
+      console.log("   " + code);
+      console.log("╚════════════════════════════╝\n");
+      console.log("Sur WhatsApp : Appareils connectés");
+      console.log("Puis Connecter un appareil → Connecter avec un numéro.");
+      console.log("Saisis le code affiché ci-dessus dans WhatsApp.");
+    } catch (error) {
+      console.error("❌ Erreur de liaison :", error.message);
+      rl.close();
+      return;
+    }
+  }
 
+  sock.ev.on("connection.update", ({ connection, lastDisconnect }) => {
     if (connection === "open") {
-      console.log("✅ MADARA SOLITAIRE MD est connecté à WhatsApp !");
+      console.log("✅ MADARA SOLITAIRE MD est connecté !");
+      if (!rl.closed) rl.close();
     }
 
     if (connection === "close") {
@@ -36,7 +84,7 @@ async function startBot() {
         console.log("🔄 Connexion interrompue. Nouvelle tentative...");
         setTimeout(() => startBot().catch(console.error), 3000);
       } else {
-        console.log("❌ Session déconnectée. Relie le compte à nouveau.");
+        console.log("❌ Session déconnectée. Supprime la session uniquement si tu veux relier le compte.");
       }
     }
   });
@@ -48,11 +96,12 @@ async function startBot() {
       if (!message.message || message.key.fromMe) continue;
 
       const jid = message.key.remoteJid;
-      if (!jid || jid === "status@broadcast" || jid.endsWith("@g.us")) continue;
+      if (!jid || jid === "status@broadcast") continue;
 
       const content =
         message.message.conversation ||
         message.message.extendedTextMessage?.text ||
+        message.message.imageMessage?.caption ||
         "";
 
       if (!content.trim().startsWith(".")) continue;
@@ -60,13 +109,16 @@ async function startBot() {
       try {
         await handleCommand(sock, jid, content);
       } catch (error) {
-        console.error("Erreur de commande :", error);
+        console.error("Erreur de commande :", error.message);
         await sock.sendMessage(jid, {
-          text: "❌ Une erreur est survenue pendant l'exécution de la commande."
+          text: "❌ Une erreur est survenue pendant cette commande."
         });
       }
     }
   });
 }
 
-startBot().catch(console.error);
+startBot().catch((error) => {
+  console.error("Erreur de démarrage :", error);
+  if (!rl.closed) rl.close();
+});
